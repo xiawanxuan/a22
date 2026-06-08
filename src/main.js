@@ -2,6 +2,9 @@ import Renderer from './modules/Renderer.js';
 import DataParser from './modules/DataParser.js';
 import GeoModeler from './modules/GeoModeler.js';
 import InteractionController from './modules/InteractionController.js';
+import SectionAnalyzer from './modules/SectionAnalyzer.js';
+import ReserveCalculator from './modules/ReserveCalculator.js';
+import ARPreviewer from './modules/ARPreviewer.js';
 import { sampleGeoData } from '../data/sampleData.js';
 
 class GeoVisualizationApp {
@@ -10,6 +13,9 @@ class GeoVisualizationApp {
         this.dataParser = null;
         this.modeler = null;
         this.controller = null;
+        this.sectionAnalyzer = null;
+        this.reserveCalculator = null;
+        this.arPreviewer = null;
 
         this.container = null;
         this.propertyPanel = null;
@@ -57,6 +63,12 @@ class GeoVisualizationApp {
 
         this.controller = new InteractionController();
         this.controller.init(this.renderer, this.modeler);
+
+        this.sectionAnalyzer = new SectionAnalyzer(this.modeler, this.renderer);
+
+        this.reserveCalculator = new ReserveCalculator(this.modeler);
+
+        this.arPreviewer = new ARPreviewer(this.renderer, this.modeler);
 
         this.renderer.addOnRenderCallback(delta => {
             this.controller.update(delta);
@@ -126,6 +138,10 @@ class GeoVisualizationApp {
         this.controller.onCoordUpdate(point => {
             this.updateCoordDisplay(point);
         });
+
+        this.initSectionEvents();
+        this.initReserveEvents();
+        this.initAREvents();
     }
 
     loadSampleData() {
@@ -505,6 +521,179 @@ class GeoVisualizationApp {
                 document.exitFullscreen();
             }
         }
+    }
+
+    initSectionEvents() {
+        document.getElementById('enable-section').addEventListener('change', e => {
+            if (e.target.checked) {
+                this.sectionAnalyzer.enable();
+            } else {
+                this.sectionAnalyzer.disable();
+            }
+        });
+
+        document.getElementById('section-type').addEventListener('change', e => {
+            this.sectionAnalyzer.setSectionType(e.target.value);
+        });
+
+        document.getElementById('section-pos-x').addEventListener('input', e => {
+            const x = parseFloat(e.target.value);
+            const y = this.sectionAnalyzer.currentSection.position.y;
+            const z = this.sectionAnalyzer.currentSection.position.z;
+            this.sectionAnalyzer.setSectionPosition(x, y, z);
+        });
+
+        document.getElementById('section-pos-y').addEventListener('input', e => {
+            const y = parseFloat(e.target.value);
+            const x = this.sectionAnalyzer.currentSection.position.x;
+            const z = this.sectionAnalyzer.currentSection.position.z;
+            this.sectionAnalyzer.setSectionPosition(x, y, z);
+        });
+
+        document.getElementById('section-rotation').addEventListener('input', e => {
+            const angle = parseFloat(e.target.value) * Math.PI / 180;
+            this.sectionAnalyzer.setSectionRotation(angle);
+        });
+
+        document.getElementById('btn-export-section').addEventListener('click', () => {
+            this.sectionAnalyzer.exportSectionData();
+        });
+    }
+
+    initReserveEvents() {
+        document.getElementById('btn-calculate-reserve').addEventListener('click', () => {
+            this.calculateReserves();
+        });
+
+        document.getElementById('btn-export-json').addEventListener('click', () => {
+            if (this.reserveCalculator.getResults()) {
+                this.reserveCalculator.exportResults();
+            } else {
+                alert('请先计算储量');
+            }
+        });
+
+        document.getElementById('btn-export-csv').addEventListener('click', () => {
+            if (this.reserveCalculator.getResults()) {
+                this.reserveCalculator.exportCSV();
+            } else {
+                alert('请先计算储量');
+            }
+        });
+    }
+
+    initAREvents() {
+        setTimeout(() => {
+            const arStatusEl = document.getElementById('ar-status');
+            if (this.arPreviewer.arSupported) {
+                arStatusEl.textContent = '设备支持: WebXR AR';
+                arStatusEl.classList.add('supported');
+                document.getElementById('ar-mode').value = 'xr';
+            } else {
+                arStatusEl.textContent = '设备支持: 方向感应模式';
+                arStatusEl.classList.add('unsupported');
+                document.getElementById('ar-mode').value = 'orientation';
+            }
+        }, 1000);
+
+        document.getElementById('btn-start-ar').addEventListener('click', () => {
+            const btn = document.getElementById('btn-start-ar');
+            if (this.arPreviewer.isARActive()) {
+                this.arPreviewer.stopAR();
+                btn.innerHTML = `
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polygon points="23 7 16 12 23 17 23 7"/>
+                        <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+                    </svg>
+                    启动AR预览
+                `;
+            } else {
+                const mode = document.getElementById('ar-mode').value;
+                this.arPreviewer.startAR(mode);
+                btn.innerHTML = `
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="6" y="4" width="4" height="16"/>
+                        <rect x="14" y="4" width="4" height="16"/>
+                    </svg>
+                    退出AR预览
+                `;
+            }
+        });
+
+        document.getElementById('ar-scale').addEventListener('input', e => {
+            const scale = parseFloat(e.target.value);
+            this.arPreviewer.setARScale(scale);
+        });
+
+        this.arPreviewer.addOnARStateChangeCallback((active, mode) => {
+            const btn = document.getElementById('btn-start-ar');
+            if (active) {
+                btn.innerHTML = `
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="6" y="4" width="4" height="16"/>
+                        <rect x="14" y="4" width="4" height="16"/>
+                    </svg>
+                    退出AR预览
+                `;
+            } else {
+                btn.innerHTML = `
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polygon points="23 7 16 12 23 17 23 7"/>
+                        <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+                    </svg>
+                    启动AR预览
+                `;
+            }
+        });
+    }
+
+    calculateReserves() {
+        const resultContainer = document.getElementById('reserve-result');
+        resultContainer.innerHTML = '<p style="color: var(--text-muted); font-size: 12px; text-align: center;">计算中...</p>';
+
+        setTimeout(() => {
+            try {
+                const results = this.reserveCalculator.calculateAll();
+                this.showReserveResults(results);
+            } catch (error) {
+                console.error('储量计算失败:', error);
+                resultContainer.innerHTML = `<p style="color: #f44; font-size: 12px; text-align: center;">计算失败: ${error.message}</p>`;
+            }
+        }, 100);
+    }
+
+    showReserveResults(results) {
+        const resultContainer = document.getElementById('reserve-result');
+
+        let html = '';
+        results.strata.forEach(stratum => {
+            html += `
+                <div class="reserve-item">
+                    <div class="reserve-item-header">
+                        <div class="reserve-item-color" style="background: ${stratum.color}"></div>
+                        <span class="reserve-item-name">${stratum.name}</span>
+                    </div>
+                    <div class="reserve-item-props">
+                        <span>体积:</span>
+                        <span>${stratum.volume.toFixed(2)} m³</span>
+                        <span>质量:</span>
+                        <span>${stratum.mass.toFixed(2)} t</span>
+                        <span>厚度:</span>
+                        <span>${stratum.averageThickness.toFixed(1)} m</span>
+                        <span>密度:</span>
+                        <span>${stratum.density} t/m³</span>
+                    </div>
+                </div>
+            `;
+        });
+
+        html += `
+            <div class="reserve-summary">
+                总质量: ${results.totalMass.toFixed(2)} 吨
+            </div>
+        `;
+
+        resultContainer.innerHTML = html;
     }
 
     start() {

@@ -110,6 +110,112 @@
                         </label>
                     </div>
                 </div>
+
+                <div class="panel-section">
+                    <h3 class="panel-title">
+                        <svg class="panel-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                            <path d="M12 22l10-5"/>
+                            <path d="M12 22L2 17"/>
+                            <line x1="12" y1="7" x2="12" y2="22"/>
+                        </svg>
+                        地质剖面
+                    </h3>
+                    <div class="section-controls">
+                        <div class="setting-item">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="enable-section">
+                                <span>启用剖面</span>
+                            </label>
+                        </div>
+                        <div class="setting-item">
+                            <label>剖面类型</label>
+                            <select id="section-type" class="form-select">
+                                <option value="vertical">垂直剖面</option>
+                                <option value="horizontal">水平剖面</option>
+                                <option value="custom">任意角度</option>
+                            </select>
+                        </div>
+                        <div class="setting-item">
+                            <label>剖面位置 X</label>
+                            <input type="range" id="section-pos-x" min="0" max="500" step="5" value="250">
+                        </div>
+                        <div class="setting-item">
+                            <label>剖面深度 Y</label>
+                            <input type="range" id="section-pos-y" min="-300" max="0" step="5" value="-150">
+                        </div>
+                        <div class="setting-item">
+                            <label>旋转角度</label>
+                            <input type="range" id="section-rotation" min="0" max="180" step="1" value="0">
+                        </div>
+                        <button class="action-btn" id="btn-export-section">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                <polyline points="7 10 12 15 17 10"/>
+                                <line x1="12" y1="15" x2="12" y2="3"/>
+                            </svg>
+                            导出剖面数据
+                        </button>
+                    </div>
+                </div>
+
+                <div class="panel-section">
+                    <h3 class="panel-title">
+                        <svg class="panel-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 0 0 6.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 0 0 6.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3"/>
+                        </svg>
+                        储量计算
+                    </h3>
+                    <div class="reserve-controls">
+                        <button class="action-btn primary-btn" id="btn-calculate-reserve">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M9 11l3 3L22 4"/>
+                                <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+                            </svg>
+                            开始计算
+                        </button>
+                        <div class="reserve-result" id="reserve-result">
+                            <div class="empty-state">
+                                <p>点击开始计算储量</p>
+                            </div>
+                        </div>
+                        <div class="btn-group">
+                            <button class="action-btn small-btn" id="btn-export-json">JSON</button>
+                            <button class="action-btn small-btn" id="btn-export-csv">CSV</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="panel-section">
+                    <h3 class="panel-title">
+                        <svg class="panel-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                            <circle cx="12" cy="12" r="3"/>
+                        </svg>
+                        AR预览
+                    </h3>
+                    <div class="ar-controls">
+                        <button class="action-btn primary-btn" id="btn-start-ar">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polygon points="23 7 16 12 23 17 23 7"/>
+                                <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+                            </svg>
+                            启动AR预览
+                        </button>
+                        <div class="setting-item">
+                            <label>模型缩放</label>
+                            <input type="range" id="ar-scale" min="0.0005" max="0.005" step="0.0001" value="0.001">
+                        </div>
+                        <div class="setting-item">
+                            <label>AR模式</label>
+                            <select id="ar-mode" class="form-select">
+                                <option value="orientation">方向感应</option>
+                                <option value="xr">WebXR (设备需支持)</option>
+                            </select>
+                        </div>
+                        <p class="hint-text" id="ar-status">设备支持: 检测中...</p>
+                    </div>
+                </div>
             </aside>
 
             <div class="viewport-container">

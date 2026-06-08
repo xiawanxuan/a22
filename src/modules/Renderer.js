@@ -88,6 +88,8 @@ class Renderer {
         this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
         this.renderer.toneMappingExposure = 1.1;
 
+        this.renderer.localClippingEnabled = false;
+
         this.renderer.domElement.style.display = 'block';
         this.renderer.domElement.style.outline = 'none';
 
@@ -218,6 +220,20 @@ class Renderer {
 
     getRenderer() {
         return this.renderer;
+    }
+
+    getThreeRenderer() {
+        return this.renderer;
+    }
+
+    setLocalClippingEnabled(enabled) {
+        if (this.renderer) {
+            this.renderer.localClippingEnabled = enabled;
+        }
+    }
+
+    getLocalClippingEnabled() {
+        return this.renderer?.localClippingEnabled || false;
     }
 
     getDomElement() {
