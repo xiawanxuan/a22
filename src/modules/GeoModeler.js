@@ -82,7 +82,9 @@ class GeoModeler {
         const width = area.width;
         const depth = area.depth;
 
-        strataData.forEach((stratum, index) => {
+        const sortedStrata = [...strataData].sort((a, b) => b.topDepth - a.topDepth);
+
+        sortedStrata.forEach((stratum, index) => {
             const layerGroup = new THREE.Group();
             layerGroup.name = stratum.id;
             layerGroup.userData = {
@@ -95,23 +97,29 @@ class GeoModeler {
 
             const topElevation = -stratum.topDepth;
             const bottomElevation = -stratum.bottomDepth;
-            const thickness = stratum.thickness;
 
-            const geometry = this.createStratumGeometry(width, depth, topElevation, bottomElevation, index, stratum.type);
+            const geometry = this.createStratumGeometry(
+                width, depth,
+                topElevation, bottomElevation,
+                stratum, index
+            );
 
             const material = new THREE.MeshPhongMaterial({
                 color: new THREE.Color(stratum.color),
                 transparent: true,
                 opacity: this.globalOpacity,
                 side: THREE.DoubleSide,
-                shininess: 10,
-                wireframe: this.wireframe
+                shininess: 15,
+                wireframe: this.wireframe,
+                depthWrite: false,
+                depthTest: true
             });
 
             const mesh = new THREE.Mesh(geometry, material);
             mesh.position.set(width / 2, 0, -depth / 2);
             mesh.receiveShadow = true;
             mesh.castShadow = true;
+            mesh.renderOrder = 10 + index;
             mesh.userData = {
                 id: stratum.id,
                 name: stratum.name,
@@ -122,14 +130,15 @@ class GeoModeler {
 
             layerGroup.add(mesh);
 
-            const edgesGeometry = new THREE.EdgesGeometry(geometry, 20);
+            const edgesGeometry = new THREE.EdgesGeometry(geometry, 25);
             const edgesMaterial = new THREE.LineBasicMaterial({
-                color: new THREE.Color(stratum.color).multiplyScalar(0.7),
+                color: new THREE.Color(stratum.color).multiplyScalar(0.4),
                 transparent: true,
-                opacity: this.globalOpacity * 0.5
+                opacity: this.globalOpacity * 0.2
             });
             const edges = new THREE.LineSegments(edgesGeometry, edgesMaterial);
             edges.position.copy(mesh.position);
+            edges.renderOrder = 10 + index;
             layerGroup.add(edges);
 
             this.strataGroup.add(layerGroup);
@@ -137,13 +146,29 @@ class GeoModeler {
         });
     }
 
-    createStratumGeometry(width, depth, topY, bottomY, index, type) {
-        const segmentsX = 30;
-        const segmentsZ = 24;
+    createStratumGeometry(width, depth, topY, bottomY, stratum, index) {
+        const segmentsX = 48;
+        const segmentsZ = 36;
         const geometry = new THREE.BoxGeometry(width, 1, depth, segmentsX, 1, segmentsZ);
 
         const positions = geometry.attributes.position;
-        const thickness = topY - bottomY;
+
+        const foldStrike = stratum.foldStrike !== undefined ? stratum.foldStrike : 45 + index * 15;
+        const foldAmplitude = stratum.foldAmplitude || (18 + index * 5);
+        const foldWavelength = stratum.foldWavelength || (220 + index * 25);
+        const dipAngle = stratum.dipAngle !== undefined ? stratum.dipAngle : (6 + index * 2);
+        const dipDirection = stratum.dipDirection !== undefined ? stratum.dipDirection : (90 + index * 20);
+        const roughness = stratum.roughness || (4 + index * 1.5);
+        const thicknessVar = stratum.thicknessVariation || (8 + index * 2);
+
+        const strikeRad = (foldStrike * Math.PI) / 180;
+        const cosStrike = Math.cos(strikeRad);
+        const sinStrike = Math.sin(strikeRad);
+
+        const dipRad = (dipAngle * Math.PI) / 180;
+        const dipDirRad = (dipDirection * Math.PI) / 180;
+
+        const baseThickness = topY - bottomY;
 
         for (let i = 0; i < positions.count; i++) {
             const x = positions.getX(i);
@@ -153,14 +178,34 @@ class GeoModeler {
             const nx = (x + width / 2) / width;
             const nz = (z + depth / 2) / depth;
 
-            const wave = Math.sin(nx * Math.PI * 2 + index * 0.5) * Math.cos(nz * Math.PI * 1.5 + index * 0.3) * 8;
-            const noise = this.simpleNoise(nx * 5, nz * 5, index) * 3;
-            const offset = wave + noise;
+            const alongStrike = nx * cosStrike + nz * sinStrike;
+            const acrossStrike = -nx * sinStrike + nz * cosStrike;
+
+            const primaryFold = Math.sin(acrossStrike * Math.PI * 2 * (depth / foldWavelength) + index * 0.6) * foldAmplitude;
+            const secondaryFold = Math.sin(acrossStrike * Math.PI * 5.2 + index * 1.1) * foldAmplitude * 0.18;
+            const axialVariation = Math.sin(alongStrike * Math.PI * 2.5 + index * 0.8) * foldAmplitude * 0.22;
+
+            const noiseLarge = this.fbmNoise(nx * 2.5 + index * 2.3, nz * 2.5 + index * 3.1, index * 150, 3) * roughness * 2.5;
+            const noiseMedium = this.fbmNoise(nx * 6 + index * 4.7, nz * 6 + index * 5.9, index * 250, 4) * roughness * 0.8;
+            const noiseFine = this.simpleNoise(nx * 18 + index * 7.2, nz * 18 + index * 8.4, index * 350) * roughness * 0.25;
+            const totalNoise = noiseLarge + noiseMedium + noiseFine;
+
+            const dipOffsetX = (nx - 0.5) * Math.sin(dipDirRad) * Math.tan(dipRad) * depth * 0.5;
+            const dipOffsetZ = (nz - 0.5) * Math.cos(dipDirRad) * Math.tan(dipRad) * depth * 0.5;
+            const totalDip = dipOffsetX + dipOffsetZ;
+
+            const faultOffset = this.getFaultOffsetAt(x + width / 2, z + depth / 2, index);
+
+            const thicknessNoise = this.fbmNoise(nx * 3 + index * 11, nz * 3 + index * 13, index * 500, 3) * thicknessVar;
+            const thicknessAlongStrike = Math.sin(alongStrike * Math.PI * 1.5 + index * 0.9) * thicknessVar * 0.4;
+
+            const totalOffset = primaryFold + secondaryFold + axialVariation + totalNoise + totalDip + faultOffset;
 
             if (y > 0) {
-                positions.setY(i, topY + offset);
+                positions.setY(i, topY + totalOffset);
             } else {
-                positions.setY(i, bottomY + offset * 0.7);
+                const thicknessMod = baseThickness + thicknessNoise + thicknessAlongStrike;
+                positions.setY(i, topY + totalOffset * 0.9 - Math.max(thicknessMod, baseThickness * 0.4));
             }
         }
 
@@ -168,9 +213,336 @@ class GeoModeler {
         return geometry;
     }
 
+    getFaultOffsetAt(x, z, stratumIndex) {
+        if (!this.data || !this.data.faults || this.data.faults.length === 0) {
+            return 0;
+        }
+
+        let totalOffset = 0;
+
+        this.data.faults.forEach((fault, fi) => {
+            const faultX = fault.position?.x || 100;
+            const faultZ = fault.position?.z || -200;
+            const faultWidth = fault.position?.width || 200;
+            const displacement = fault.displacement || 20;
+            const strike = fault.strike || 0;
+
+            const relX = x - faultX;
+            const relZ = z - (faultZ + (this.data.metadata?.area?.depth || 400) / 2);
+
+            const strikeRad = (strike * Math.PI) / 180;
+            const distAlong = relX * Math.cos(strikeRad) + relZ * Math.sin(strikeRad);
+            const distAcross = -relX * Math.sin(strikeRad) + relZ * Math.cos(strikeRad);
+
+            const alongFactor = Math.max(0, 1 - Math.abs(distAlong) / (faultWidth / 2));
+            const faultInfluence = Math.exp(-Math.pow(distAcross / 30, 2)) * alongFactor;
+
+            const baseDisplacement = displacement * 0.4 * (1 - stratumIndex * 0.12);
+            const faultOffset = Math.max(0, baseDisplacement) * faultInfluence;
+
+            totalOffset += (fi % 2 === 0 ? faultOffset : -faultOffset);
+        });
+
+        return totalOffset;
+    }
+
     simpleNoise(x, y, seed) {
         const n = Math.sin(x * 12.9898 + y * 78.233 + seed * 43.758) * 43758.5453;
         return n - Math.floor(n) - 0.5;
+    }
+
+    fbmNoise(x, y, seed, octaves = 4) {
+        let value = 0;
+        let amplitude = 1;
+        let frequency = 1;
+        let maxValue = 0;
+
+        for (let i = 0; i < octaves; i++) {
+            value += this.simpleNoise(x * frequency, y * frequency, seed + i * 100) * amplitude;
+            maxValue += amplitude;
+            amplitude *= 0.5;
+            frequency *= 2;
+        }
+
+        return value / maxValue;
+    }
+
+    getSurfaceElevation(x, z, stratum, index, surfaceType) {
+        const area = this.data.metadata?.area || { width: 500, depth: 400 };
+        const width = area.width;
+        const depth = area.depth;
+
+        const nx = (x + width / 2) / width;
+        const nz = (z + depth / 2) / depth;
+
+        const baseElevation = surfaceType === 'top' ? -stratum.topDepth : -stratum.bottomDepth;
+
+        const foldAmplitude = stratum.foldAmplitude || 15;
+        const foldWavelength = stratum.foldWavelength || 300;
+        const foldDirection = stratum.foldDirection || 30;
+
+        const foldRad = (foldDirection * Math.PI) / 180;
+        const foldX = nx * Math.cos(foldRad) - nz * Math.sin(foldRad);
+        const foldZ = nx * Math.sin(foldRad) + nz * Math.cos(foldRad);
+
+        const foldWave = Math.sin(foldX * Math.PI * 2 * (width / foldWavelength) + index * 0.8) * foldAmplitude;
+        const secondaryFold = Math.sin(foldZ * Math.PI * 3 + index * 0.5) * foldAmplitude * 0.3;
+
+        const noiseScale = 0.008;
+        const noiseAmplitude = 8;
+        const noiseVal = this.fbmNoise(
+            (x + width / 2) * noiseScale + index * 10,
+            (z + depth / 2) * noiseScale + index * 20,
+            index + (surfaceType === 'top' ? 0 : 1000),
+            5
+        ) * noiseAmplitude;
+
+        const tiltX = (nx - 0.5) * (stratum.tiltX || 12);
+        const tiltZ = (nz - 0.5) * (stratum.tiltZ || 8);
+
+        let elevation = baseElevation + foldWave + secondaryFold + noiseVal + tiltX + tiltZ;
+
+        if (this.data.faults && this.data.faults.length > 0) {
+            this.data.faults.forEach((fault, fi) => {
+                const faultX = fault.position?.x || 100;
+                const faultZ = fault.position?.z || -200;
+                const faultWidth = fault.position?.width || 200;
+                const displacement = fault.displacement || 20;
+
+                const relX = (x + width / 2) - faultX;
+                const relZ = (z + depth / 2) - (faultZ + depth / 2);
+
+                const strikeRad = (fault.strike || 0) * Math.PI / 180;
+                const distAlongStrike = relX * Math.cos(strikeRad) + relZ * Math.sin(strikeRad);
+                const distAcrossStrike = -relX * Math.sin(strikeRad) + relZ * Math.cos(strikeRad);
+
+                const alongStrikeFactor = Math.max(0, 1 - Math.abs(distAlongStrike) / (faultWidth / 2));
+                const faultInfluence = Math.exp(-Math.pow(distAcrossStrike / 25, 2)) * alongStrikeFactor;
+
+                const faultOffset = displacement * faultInfluence * 0.5;
+                elevation += (fi % 2 === 0 ? faultOffset : -faultOffset);
+            });
+        }
+
+        return elevation;
+    }
+
+    createStratumGeometryPro(width, depth, topY, bottomY, stratum, index) {
+        const segmentsX = 80;
+        const segmentsZ = 64;
+
+        const topPositions = [];
+        const bottomPositions = [];
+
+        for (let j = 0; j <= segmentsZ; j++) {
+            for (let i = 0; i <= segmentsX; i++) {
+                const x = (i / segmentsX - 0.5) * width;
+                const z = (j / segmentsZ - 0.5) * depth;
+
+                const topElev = this.getSurfaceElevation(x, z, stratum, index, 'top');
+                const bottomElev = this.getSurfaceElevation(x, z, stratum, index, 'bottom');
+
+                topPositions.push(new THREE.Vector3(x, topElev, z));
+                bottomPositions.push(new THREE.Vector3(x, bottomElev, z));
+            }
+        }
+
+        const vertices = [];
+        const indices = [];
+        let vertexIndex = 0;
+
+        for (let j = 0; j < segmentsZ; j++) {
+            for (let i = 0; i < segmentsX; i++) {
+                const a = j * (segmentsX + 1) + i;
+                const b = a + 1;
+                const c = a + segmentsX + 1;
+                const d = c + 1;
+
+                const topA = topPositions[a];
+                const topB = topPositions[b];
+                const topC = topPositions[c];
+                const topD = topPositions[d];
+
+                vertices.push(topA.x, topA.y, topA.z);
+                vertices.push(topB.x, topB.y, topB.z);
+                vertices.push(topC.x, topC.y, topC.z);
+                vertices.push(topD.x, topD.y, topD.z);
+
+                const baseIdx = vertexIndex;
+                indices.push(baseIdx, baseIdx + 2, baseIdx + 1);
+                indices.push(baseIdx + 1, baseIdx + 2, baseIdx + 3);
+                vertexIndex += 4;
+
+                const botA = bottomPositions[a];
+                const botB = bottomPositions[b];
+                const botC = bottomPositions[c];
+                const botD = bottomPositions[d];
+
+                vertices.push(botA.x, botA.y, botA.z);
+                vertices.push(botB.x, botB.y, botB.z);
+                vertices.push(botC.x, botC.y, botC.z);
+                vertices.push(botD.x, botD.y, botD.z);
+
+                const botBaseIdx = vertexIndex;
+                indices.push(botBaseIdx, botBaseIdx + 1, botBaseIdx + 2);
+                indices.push(botBaseIdx + 1, botBaseIdx + 3, botBaseIdx + 2);
+                vertexIndex += 4;
+
+                const sideY1 = topA;
+                const sideY2 = botA;
+                const sideY3 = topB;
+                const sideY4 = botB;
+
+                vertices.push(sideY1.x, sideY1.y, sideY1.z);
+                vertices.push(sideY2.x, sideY2.y, sideY2.z);
+                vertices.push(sideY3.x, sideY3.y, sideY3.z);
+                vertices.push(sideY4.x, sideY4.y, sideY4.z);
+
+                const sideBaseIdx = vertexIndex;
+                indices.push(sideBaseIdx, sideBaseIdx + 1, sideBaseIdx + 2);
+                indices.push(sideBaseIdx + 1, sideBaseIdx + 3, sideBaseIdx + 2);
+                vertexIndex += 4;
+            }
+        }
+
+        for (let i = 0; i < segmentsX; i++) {
+            const frontIdx = i;
+            const backIdx = (segmentsZ) * (segmentsX + 1) + i;
+
+            const topFront = topPositions[frontIdx];
+            const botFront = bottomPositions[frontIdx];
+            const topFrontNext = topPositions[frontIdx + 1];
+            const botFrontNext = bottomPositions[frontIdx + 1];
+
+            vertices.push(topFront.x, topFront.y, topFront.z);
+            vertices.push(botFront.x, botFront.y, botFront.z);
+            vertices.push(topFrontNext.x, topFrontNext.y, topFrontNext.z);
+            vertices.push(botFrontNext.x, botFrontNext.y, botFrontNext.z);
+
+            const frontBaseIdx = vertexIndex;
+            indices.push(frontBaseIdx, frontBaseIdx + 2, frontBaseIdx + 1);
+            indices.push(frontBaseIdx + 1, frontBaseIdx + 2, frontBaseIdx + 3);
+            vertexIndex += 4;
+
+            const topBack = topPositions[backIdx];
+            const botBack = bottomPositions[backIdx];
+            const topBackNext = topPositions[backIdx + 1];
+            const botBackNext = bottomPositions[backIdx + 1];
+
+            vertices.push(topBack.x, topBack.y, topBack.z);
+            vertices.push(botBack.x, botBack.y, botBack.z);
+            vertices.push(topBackNext.x, topBackNext.y, topBackNext.z);
+            vertices.push(botBackNext.x, botBackNext.y, botBackNext.z);
+
+            const backBaseIdx = vertexIndex;
+            indices.push(backBaseIdx, backBaseIdx + 1, backBaseIdx + 2);
+            indices.push(backBaseIdx + 1, backBaseIdx + 3, backBaseIdx + 2);
+            vertexIndex += 4;
+        }
+
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+        geometry.setIndex(indices);
+        geometry.computeVertexNormals();
+        geometry.computeBoundingBox();
+        geometry.computeBoundingSphere();
+
+        return geometry;
+    }
+
+    createStratumContourLines(width, depth, baseElevation, stratum, index, surfaceType) {
+        const group = new THREE.Group();
+
+        const segmentsX = 40;
+        const segmentsZ = 32;
+
+        const contourLevels = [-5, 0, 5, 10];
+
+        contourLevels.forEach((level, levelIdx) => {
+            const points = [];
+
+            for (let i = 0; i <= segmentsX; i++) {
+                const x = (i / segmentsX - 0.5) * width;
+                const z = 0;
+
+                const elev = this.getSurfaceElevation(x, z, stratum, index, surfaceType);
+                if (Math.abs(elev - baseElevation - level) < 20) {
+                    points.push(new THREE.Vector3(x, elev, z));
+                }
+            }
+
+            if (points.length > 1) {
+                const geometry = new THREE.BufferGeometry().setFromPoints(points);
+                const material = new THREE.LineBasicMaterial({
+                    color: new THREE.Color(stratum.color).multiplyScalar(0.6 + levelIdx * 0.1),
+                    transparent: true,
+                    opacity: this.globalOpacity * 0.4,
+                    linewidth: 1
+                });
+                const line = new THREE.Line(geometry, material);
+                line.userData = { selectable: false, isHelper: true };
+                group.add(line);
+            }
+        });
+
+        return group;
+    }
+
+    createStratumSideEdges(width, depth, topY, bottomY, stratum, index) {
+        const group = new THREE.Group();
+
+        const edgesColor = new THREE.Color(stratum.color).multiplyScalar(0.7);
+        const edgesMaterial = new THREE.LineBasicMaterial({
+            color: edgesColor,
+            transparent: true,
+            opacity: this.globalOpacity * 0.6
+        });
+
+        const cornerPoints = [
+            { x: -width / 2, z: -depth / 2 },
+            { x: width / 2, z: -depth / 2 },
+            { x: width / 2, z: depth / 2 },
+            { x: -width / 2, z: depth / 2 }
+        ];
+
+        for (let i = 0; i < 4; i++) {
+            const p1 = cornerPoints[i];
+            const p2 = cornerPoints[(i + 1) % 4];
+
+            const top1 = this.getSurfaceElevation(p1.x, p1.z, stratum, index, 'top');
+            const bot1 = this.getSurfaceElevation(p1.x, p1.z, stratum, index, 'bottom');
+            const top2 = this.getSurfaceElevation(p2.x, p2.z, stratum, index, 'top');
+            const bot2 = this.getSurfaceElevation(p2.x, p2.z, stratum, index, 'bottom');
+
+            const topLinePoints = [
+                new THREE.Vector3(p1.x, top1, p1.z),
+                new THREE.Vector3(p2.x, top2, p2.z)
+            ];
+            const topLineGeo = new THREE.BufferGeometry().setFromPoints(topLinePoints);
+            const topLine = new THREE.Line(topLineGeo, edgesMaterial);
+            topLine.userData = { selectable: false, isHelper: true };
+            group.add(topLine);
+
+            const botLinePoints = [
+                new THREE.Vector3(p1.x, bot1, p1.z),
+                new THREE.Vector3(p2.x, bot2, p2.z)
+            ];
+            const botLineGeo = new THREE.BufferGeometry().setFromPoints(botLinePoints);
+            const botLine = new THREE.Line(botLineGeo, edgesMaterial);
+            botLine.userData = { selectable: false, isHelper: true };
+            group.add(botLine);
+
+            const cornerLinePoints = [
+                new THREE.Vector3(p1.x, top1, p1.z),
+                new THREE.Vector3(p1.x, bot1, p1.z)
+            ];
+            const cornerLineGeo = new THREE.BufferGeometry().setFromPoints(cornerLinePoints);
+            const cornerLine = new THREE.Line(cornerLineGeo, edgesMaterial);
+            cornerLine.userData = { selectable: false, isHelper: true };
+            group.add(cornerLine);
+        }
+
+        return group;
     }
 
     buildFault(faultData) {
@@ -210,13 +582,16 @@ class GeoModeler {
             opacity: this.globalOpacity * 0.8,
             side: THREE.DoubleSide,
             shininess: 5,
-            wireframe: this.wireframe
+            wireframe: this.wireframe,
+            depthWrite: false,
+            depthTest: true
         });
 
         const mesh = new THREE.Mesh(geometry, material);
         mesh.position.set(pos.x, -height / 2, pos.z);
         mesh.rotation.y = -strikeRad;
         mesh.rotation.x = dipRad - Math.PI / 2;
+        mesh.renderOrder = 50;
 
         mesh.userData = {
             id: faultData.id,
@@ -295,12 +670,15 @@ class GeoModeler {
             opacity: this.globalOpacity * 0.7,
             side: THREE.DoubleSide,
             shininess: 8,
-            wireframe: this.wireframe
+            wireframe: this.wireframe,
+            depthWrite: false,
+            depthTest: true
         });
 
         const mesh = new THREE.Mesh(geometry, material);
         mesh.position.set(axis.x, -80, axis.z);
         mesh.rotation.y = -directionRad;
+        mesh.renderOrder = 40;
 
         mesh.userData = {
             id: foldData.id,
@@ -349,10 +727,13 @@ class GeoModeler {
             opacity: this.globalOpacity * 0.6,
             side: THREE.DoubleSide,
             shininess: 30,
-            wireframe: this.wireframe
+            wireframe: this.wireframe,
+            depthWrite: false,
+            depthTest: true
         });
         const casing = new THREE.Mesh(casingGeometry, casingMaterial);
         casing.position.set(pos.x, -depth / 2, pos.z);
+        casing.renderOrder = 20;
         casing.userData = {
             id: drillingData.id,
             name: drillingData.name,
@@ -378,7 +759,9 @@ class GeoModeler {
                     transparent: true,
                     opacity: this.globalOpacity,
                     shininess: 10,
-                    wireframe: this.wireframe
+                    wireframe: this.wireframe,
+                    depthWrite: false,
+                    depthTest: true
                 });
                 const layerMesh = new THREE.Mesh(layerGeometry, layerMaterial);
                 layerMesh.position.set(
@@ -386,6 +769,7 @@ class GeoModeler {
                     -(currentDepth + layerThickness / 2),
                     pos.z
                 );
+                layerMesh.renderOrder = 25;
                 layerMesh.userData = {
                     id: drillingData.id,
                     name: drillingData.name,
@@ -523,14 +907,22 @@ class GeoModeler {
                     if (Array.isArray(child.material)) {
                         child.material.forEach(m => {
                             m.opacity = opacity;
-                            m.transparent = opacity < 1;
+                            m.transparent = true;
+                            m.depthWrite = false;
+                            m.depthTest = true;
                         });
                     } else {
                         child.material.opacity = opacity;
-                        child.material.transparent = opacity < 1;
+                        child.material.transparent = true;
+                        child.material.depthWrite = false;
+                        child.material.depthTest = true;
                     }
                 }
                 if (child.isLineSegments && child.material) {
+                    child.material.opacity = opacity * 0.5;
+                    child.material.transparent = true;
+                }
+                if (child.isLine && child.material) {
                     child.material.opacity = opacity * 0.5;
                     child.material.transparent = true;
                 }
@@ -555,9 +947,13 @@ class GeoModeler {
                     if (Array.isArray(child.material)) {
                         child.material.forEach(m => {
                             m.wireframe = enabled;
+                            m.depthWrite = false;
+                            m.transparent = true;
                         });
                     } else {
                         child.material.wireframe = enabled;
+                        child.material.depthWrite = false;
+                        child.material.transparent = true;
                     }
                 }
             });
